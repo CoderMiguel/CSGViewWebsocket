@@ -122,11 +122,11 @@
     }
 
     // Function to update UI based on connection state
-    function updateUI(isConnected = isWebSocketOpen()) {
+    function updateUI(isConnected = webSocketIsOpen()) {
         apiTokenInput.disabled = isConnected;
         connectButton.disabled = isConnected;
         wsHeartbeatInterval.disabled = isConnected;
-        wsHeartbeatMessage.disabled = isConnected; <!-- Commenting allows for testing changes in Heartbeat -->
+        wsHeartbeatMessage.disabled = isConnected;
 
         // wsHeartbeatFlag <!-- we want this to always be enabled for manually managing the heartbeat -->
 
@@ -137,8 +137,8 @@
         messageInput.placeholder = isConnected ? "Type a message..." : "Connect to a server first...";
     }
 
-    isWebSocketOpen = () => {
-        return socket.readyState === WebSocket.OPEN
+    webSocketIsOpen = () => {
+        return socket && socket.readyState === WebSocket.OPEN
     };
     secondsSinceEpoch = () => {
         return Math.floor(Date.now() / 1000)
@@ -175,7 +175,7 @@
             return;
         }
 
-        if (socket && socket.readyState === WebSocket.OPEN) {
+        if (webSocketIsOpen()) {
             appendMessage('Already connected.', 'system');
             return;
         }
@@ -223,8 +223,9 @@
 
     // Disconnect from WebSocket server
     disconnectButton.addEventListener('click', () => {
-        if (isWebSocketOpen()) {
+        if (webSocketIsOpen()) {
             socket.close();
+            endHeartbeat();
             appendMessage('Disconnecting...', 'system');
         } else {
             appendMessage('Not connected.', 'system');
@@ -233,7 +234,7 @@
 
     // Send message when button is clicked
     sendButton.addEventListener('click', () => {
-        if (!socket || !isWebSocketOpen()) {
+        if (!webSocketIsOpen()) {
             appendMessage('Not connected to a WebSocket server.', 'error');
             return;
         }
@@ -246,15 +247,15 @@
     });
 
     // Allow sending message with Enter key
-    messageInput.addEventListener('keypress', (event) => {
-        if (event.key === 'Enter') {
-            sendButton.click();
+    messageInput.addEventListener('keypress', ({key}) => {
+        if (key === 'Enter') {
+            sendButton.click()
         }
     });
 
     window.addEventListener('beforeunload', () => {
-        if (socket && isWebSocketOpen()) {
-            socket.close();
+        if (webSocketIsOpen()) {
+            socket.close()
         }
     });
 
