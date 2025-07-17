@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta content="width=device-width, initial-scale=1.0" name="viewport">
+    <title>Pure JS CSG View WebSocket Test Client</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+
+        div {
+            margin-bottom: 1em;
+        }
+
+        #messages {
+            border: 1px solid #ccc;
+            padding: 10px;
+            min-height: 200px;
+            max-height: 400px; /* Added max-height for scrollability */
+            overflow-y: auto; /* Added scroll for messages */
+            margin-bottom: 10px;
+            background-color: #f9f9f9;
+            word-wrap: break-word; /* To prevent long words from breaking layout */
+        }
+
+        .message-item {
+            margin-bottom: 5px;
+            line-height: 1.4;
+        }
+
+        .sent {
+            color: blue;
+        }
+
+        .received {
+            color: green;
+        }
+
+        .system {
+            color: gray;
+            font-style: italic;
+        }
+
+        .error {
+            color: red;
+            font-weight: bold;
+        }
+
+        /*input[type="text"] { width: calc(100% - 100px); }*/
+        input[type="text"], input[type="number"] {
+            padding: 8px;
+            box-sizing: border-box;
+        }
+
+        button {
+            padding: 8px 15px;
+            margin-left: 5px;
+            cursor: pointer;
+        }
+
+        #messageInput:disabled, #messageInput[disabled] {
+            width: 200px;
+        }
+
+        #apiToken {
+            width: 300px;
+        }
+
+        #wsHeartbeatInterval {
+            width: 4em;
+        }
+    </style>
+</head>
+<body>
+<h1>Pure JS CSG View WebSocket Test Client</h1>
+
+<div>
+    <label for="apiToken">CSG View API Token</label>
+    <input id="apiToken" placeholder="CSG View API Token" type="text">
+    <button id="connectButton">Connect</button>
+    <button disabled id="disconnectButton">Disconnect</button>
+</div>
+<div>
+    <label for="wsHeartbeatMessage">Heartbeat Message</label>
+    <input id="wsHeartbeatMessage" type="text" value="{ 'type': 'gl-hb' }">
+    <label for="wsHeartbeatInterval">Heartbeat Interval</label>
+    <input id="wsHeartbeatInterval" placeholder="seconds" type="number" value="30">
+    <input checked id="wsHeartbeatFlag" placeholder="Heartbeat value" type="checkbox">
+    <label for="wsHeartbeatFlag">Send Heartbeat</label>
+</div>
+
+<h3>Messages</h3>
+<div id="messages"></div>
+<input disabled id="messageInput" placeholder="Type a message..." type="text">
+<button disabled id="sendButton">Send Message</button>
+
+<p><sub>Open your browser's console (F12) for detailed WebSocket event logs.</sub></p>
+
+<script>
+    const apiTokenInput = document.getElementById('apiToken');
+    const connectButton = document.getElementById('connectButton');
+    const disconnectButton = document.getElementById('disconnectButton');
+    const wsHeartbeatFlag = document.getElementById('wsHeartbeatFlag');
+    const wsHeartbeatInterval = document.getElementById('wsHeartbeatInterval');
+    const wsHeartbeatMessage = document.getElementById('wsHeartbeatMessage');
+    const messagesDiv = document.getElementById('messages');
+    const messageInput = document.getElementById('messageInput');
+    const sendButton = document.getElementById('sendButton');
+
+    let socket = null; // Variable to hold our WebSocket instance
+    let heartbeat = null;  // Variable to manage WebSocket heartbeat
+
+    // Helper function to append messages to the display
+    function appendMessage(text, type) {
+        const p = document.createElement('p');
+        p.textContent = text;
+        p.className = 'message-item ' + type;
+        messagesDiv.appendChild(p);
+        messagesDiv.scrollTop = messagesDiv.scrollHeight; // Scroll to bottom
+    }
+
+    // Function to update UI based on connection state
+    function updateUI(isConnected = isWebSocketOpen()) {
+        apiTokenInput.disabled = isConnected;
+        connectButton.disabled = isConnected;
+        wsHeartbeatInterval.disabled = isConnected;
+        wsHeartbeatMessage.disabled = isConnected; <!-- Commenting allows for testing changes in Heartbeat -->
+
+        // wsHeartbeatFlag <!-- we want this to always be enabled for manually managing the heartbeat -->
+
+        disconnectButton.disabled = !isConnected;
+        messageInput.disabled = !isConnected;
+        sendButton.disabled = !isConnected;
+
+        messageInput.placeholder = isConnected ? "Type a message..." : "Connect to a server first...";
+    }
+
+    isWebSocketOpen = () => {
+        return socket.readyState === WebSocket.OPEN
+    };
+    secondsSinceEpoch = () => {
+        return Math.floor(Date.now() / 1000)
+    };
+    sendHeartbeatMessage = () => {
+        let heartbeatMessage = wsHeartbeatMessage.value || '{"type": "gl-hb"}';
+
+        appendMessage(`Heartbeat: ${heartbeatMessage}`, 'send');
+        if (socket) {
+            socket.send(heartbeatMessage)
+            console.log(`Heartbeat: ${heartbeatMessage} at: ${secondsSinceEpoch()}`)
+        }
+    };
+    startHeartbeat = () => {
+        let interval = parseInt(wsHeartbeatInterval.value || 30);
+        sendHeartbeatMessage();
+        heartbeat = setInterval(() => {
+            sendHeartbeatMessage()
+        }, interval * 1000);
+    };
+    endHeartbeat = () => {
+        clearInterval(heartbeat);
+        heartbeat = null;
+        appendMessage(`Heartbeat disabled`, 'error');
+        console.log(`Heartbeat disabled at: ${secondsSinceEpoch()}`)
+    };
+
+    // Connect to WebSocket server
+    connectButton.addEventListener('click', () => {
+        const apiToken = apiTokenInput.value.trim();
+
+        if (!apiToken) {
+            appendMessage('Please enter an API Token.', 'error');
+            return;
+        }
+
+        if (socket && socket.readyState === WebSocket.OPEN) {
+            appendMessage('Already connected.', 'system');
+            return;
+        }
+
+        const wsUrl = `wss://api.csgview.com/ws/websocket/${apiToken}`
+        appendMessage(`Attempting to connect to: ${wsUrl}`, 'system');
+        console.log(`Attempting to connect to: ${wsUrl}`);
+
+        try {
+            socket = new WebSocket(wsUrl);
+
+            socket.addEventListener('open', (event) => {
+                if (wsHeartbeatFlag.checked) {
+                    startHeartbeat()
+                }
+
+                console.log('WebSocket connection opened:', event);
+                appendMessage('Connection established!', 'system');
+                updateUI();
+            });
+
+            socket.addEventListener('message', (event) => {
+                console.log('Message from server:', event.data);
+                appendMessage(`Server: ${event.data}`, 'received');
+            });
+
+            socket.addEventListener('error', (event) => {
+                console.error('WebSocket error:', event);
+                appendMessage('WebSocket Error! Check console.', 'error');
+                updateUI();
+            });
+
+            socket.addEventListener('close', (event) => {
+                console.log('WebSocket connection closed:', event);
+                appendMessage(`Connection closed. Code: ${event.code}, Reason: ${event.reason || 'No reason'}`, 'system');
+                updateUI();
+            });
+
+        } catch (error) {
+            console.error("Failed to create WebSocket:", error);
+            appendMessage(`Failed to create WebSocket: ${error.message}`, 'error');
+            updateUI();
+        }
+    });
+
+    // Disconnect from WebSocket server
+    disconnectButton.addEventListener('click', () => {
+        if (isWebSocketOpen()) {
+            socket.close();
+            appendMessage('Disconnecting...', 'system');
+        } else {
+            appendMessage('Not connected.', 'system');
+        }
+    });
+
+    // Send message when button is clicked
+    sendButton.addEventListener('click', () => {
+        if (!socket || !isWebSocketOpen()) {
+            appendMessage('Not connected to a WebSocket server.', 'error');
+            return;
+        }
+        const message = messageInput.value;
+        if (message.trim() !== '') {
+            socket.send(message);
+            appendMessage(`Client: ${message}`, 'sent');
+            messageInput.value = ''; // Clear input
+        }
+    });
+
+    // Allow sending message with Enter key
+    messageInput.addEventListener('keypress', (event) => {
+        if (event.key === 'Enter') {
+            sendButton.click();
+        }
+    });
+
+    window.addEventListener('beforeunload', () => {
+        if (socket && isWebSocketOpen()) {
+            socket.close();
+        }
+    });
+
+    wsHeartbeatFlag.addEventListener('change', ({target}) => {
+        if (target.checked) {
+            startHeartbeat();
+        } else {
+            endHeartbeat();
+        }
+    });
+
+    updateUI(); // Initialize UI
+</script>
+</body>
+</html>
